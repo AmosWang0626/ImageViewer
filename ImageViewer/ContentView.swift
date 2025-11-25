@@ -82,6 +82,13 @@ struct ContentView: View {
                             lastOffset = offset
                         }
                 )
+                .onAppear {
+                    // 注册键盘事件监听器
+                    NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+                        handleKeyDown(event)
+                        return event
+                    }
+                }
                 
                 // 底部状态栏
                 HStack {
@@ -224,6 +231,18 @@ struct ContentView: View {
         .onChange(of: currentIndex) { _ in
             // 当切换图片时重置旋转角度和缩放
             resetImageTransform()
+        }
+    }
+    
+    func handleKeyDown(_ event: NSEvent) {
+        // 处理键盘事件
+        switch event.keyCode {
+        case 126: // 上箭头键
+            rotationAngle -= 90
+        case 125: // 下箭头键
+            rotationAngle += 90
+        default:
+            break
         }
     }
     
