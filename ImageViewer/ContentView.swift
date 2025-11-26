@@ -18,6 +18,7 @@ struct ContentView: View {
     @State private var offset: CGSize = .zero
     @State private var lastScale: CGFloat = 1.0
     @State private var lastOffset: CGSize = .zero
+    @State private var needsAutoScaleAdjustment = false
     
     var body: some View {
         VStack(spacing: 0) {
@@ -41,15 +42,17 @@ struct ContentView: View {
             } else if !imageFiles.isEmpty {
                 // 主要图片显示区域
                 GeometryReader { geometry in
-                    AsyncImage(url: imageFiles[currentIndex]) { image in
-                        image
-                            .resizable()
-                            .aspectRatio(contentMode: .fit)
-                            .rotationEffect(.degrees(rotationAngle))
-                            .scaleEffect(scale)
-                            .offset(offset)
-                    } placeholder: {
-                        ProgressView()
+                    ZStack {
+                        AsyncImage(url: imageFiles[currentIndex]) { image in
+                            image
+                                .resizable()
+                                .aspectRatio(contentMode: .fit)
+                                .rotationEffect(.degrees(rotationAngle))
+                                .scaleEffect(scale * rotationScaleFactor())
+                                .offset(offset)
+                        } placeholder: {
+                            ProgressView()
+                        }
                     }
                     .frame(width: geometry.size.width, height: geometry.size.height)
                 }
@@ -57,6 +60,7 @@ struct ContentView: View {
                     MagnificationGesture()
                         .onChanged { value in
                             scale = lastScale * value.magnitude
+                            needsAutoScaleAdjustment = false
                         }
                         .onEnded { value in
                             lastScale = scale
@@ -130,6 +134,7 @@ struct ContentView: View {
                             Button(action: {
                                 scale = max(0.5, scale / 1.5)
                                 lastScale = scale
+                                needsAutoScaleAdjustment = false
                             }) {
                                 Image(systemName: "minus.magnifyingglass")
                             }
@@ -141,6 +146,7 @@ struct ContentView: View {
                                 lastScale = 1.0
                                 offset = .zero
                                 lastOffset = .zero
+                                needsAutoScaleAdjustment = true
                             }) {
                                 Text("100%")
                                     .font(.caption)
@@ -151,6 +157,7 @@ struct ContentView: View {
                             Button(action: {
                                 scale = min(5.0, scale * 1.5)
                                 lastScale = scale
+                                needsAutoScaleAdjustment = false
                             }) {
                                 Image(systemName: "plus.magnifyingglass")
                             }
@@ -170,6 +177,11 @@ struct ContentView: View {
                             
                             Button(action: {
                                 rotationAngle = 0
+                                scale = 1.0
+                                lastScale = 1.0
+                                offset = .zero
+                                lastOffset = .zero
+                                needsAutoScaleAdjustment = true
                             }) {
                                 Text("Reset")
                                     .font(.caption)
@@ -231,6 +243,43 @@ struct ContentView: View {
         .onChange(of: currentIndex) { _ in
             // 当切换图片时重置旋转角度和缩放
             resetImageTransform()
+        }
+        .onChange(of: rotationAngle) { _ in
+            // 当旋转角度改变时，可能需要调整缩放
+            if needsAutoScaleAdjustment {
+                adjustScaleForRotation()
+            }
+        }
+    }
+    
+    func rotationScaleFactor() -> CGFloat {
+        // 根据旋转角度计算额外的缩放因子
+        let normalizedAngle = abs(rotationAngle.truncatingRemainder(dividingBy: 360))
+        
+        // 当旋转到90度或270度时，返回适当的缩放因子以确保完整显示
+        if normalizedAngle == 90 || normalizedAngle == 270 {
+            return 0.8
+        }
+        
+        return 1.0
+    }
+    
+    func adjustScaleForRotation() {
+        // 根据旋转角度自动调整缩放
+        let normalizedAngle = abs(rotationAngle.truncatingRemainder(dividingBy: 360))
+        
+        if normalizedAngle == 90 || normalizedAngle == 270 {
+            // 旋转90或270度时，自动调整缩放以适应视图
+            if scale == 1.0 {
+                scale = 0.8
+                lastScale = 0.8
+            }
+        } else if normalizedAngle == 0 || normalizedAngle == 180 {
+            // 旋转到0或180度时，恢复正常缩放
+            if scale == 0.8 {
+                scale = 1.0
+                lastScale = 1.0
+            }
         }
     }
     
@@ -308,6 +357,7 @@ struct ContentView: View {
         lastScale = 1.0
         offset = .zero
         lastOffset = .zero
+        needsAutoScaleAdjustment = true
     }
 }
 
