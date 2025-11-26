@@ -48,7 +48,7 @@ class HistoryManager: ObservableObject {
     func clearHistory() {
         history.removeAll()
     }
-    
+
     private func saveHistory() {
         let urls = history.map { $0.absoluteString }
         UserDefaults.standard.set(urls, forKey: historyKey)
@@ -92,7 +92,7 @@ struct ContentView: View {
                         .multilineTextAlignment(.center)
                         .padding()
                     
-                    Button("Select Folder") {
+                    Button("选择文件夹") {
                         selectFolder()
                     }
                     .padding()
@@ -161,6 +161,17 @@ struct ContentView: View {
                         if let url = notification.userInfo?["folderURL"] as? URL {
                             folderURL = url
                             loadImagesFromFolder()
+                        }
+                    }
+                    
+                    // 注册错误显示监听器
+                    NotificationCenter.default.addObserver(
+                        forName: Notification.Name("ShowError"),
+                        object: nil,
+                        queue: .main
+                    ) { notification in
+                        if let message = notification.userInfo?["message"] as? String {
+                            errorMessage = message
                         }
                     }
                 }
@@ -254,7 +265,7 @@ struct ContentView: View {
                                 lastOffset = .zero
                                 needsAutoScaleAdjustment = true
                             }) {
-                                Text("Reset")
+                                Text("重置")
                                     .font(.caption)
                             }
                             .buttonStyle(.borderless)
@@ -282,7 +293,7 @@ struct ContentView: View {
                         .buttonStyle(.borderless)
                         .keyboardShortcut("h", modifiers: [.command])
                         
-                        Button("Change Folder") {
+                        Button("更换文件夹") {
                             selectFolder()
                         }
                         .buttonStyle(.borderedProminent)
@@ -306,17 +317,17 @@ struct ContentView: View {
                         .foregroundColor(.gray)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                     
-                    Text("No images loaded")
+                    Text("未加载图片")
                         .font(.headline)
                         .padding()
                     
-                    Button("Select Folder") {
+                    Button("选择文件夹") {
                         selectFolder()
                     }
                     .padding()
                     
                     if !historyManager.history.isEmpty {
-                        Menu("Recent Folders") {
+                        Menu("最近的文件夹") {
                             ForEach(0..<min(5, historyManager.history.count), id: \.self) { index in
                                 let url = historyManager.history[index]
                                 Button(url.lastPathComponent) {
@@ -326,7 +337,7 @@ struct ContentView: View {
                             
                             Divider()
                             
-                            Button("View All History") {
+                            Button("查看全部历史记录") {
                                 showingHistory = true
                             }
                         }
@@ -345,6 +356,17 @@ struct ContentView: View {
                         if let url = notification.userInfo?["folderURL"] as? URL {
                             folderURL = url
                             loadImagesFromFolder()
+                        }
+                    }
+                    
+                    // 注册错误显示监听器
+                    NotificationCenter.default.addObserver(
+                        forName: Notification.Name("ShowError"),
+                        object: nil,
+                        queue: .main
+                    ) { notification in
+                        if let message = notification.userInfo?["message"] as? String {
+                            errorMessage = message
                         }
                     }
                 }
@@ -375,6 +397,35 @@ struct ContentView: View {
         guard FileManager.default.fileExists(atPath: url.path) else {
             // 如果文件夹不存在，从历史记录中移除
             historyManager.removeFolder(url)
+            
+            // 通过通知传递错误信息
+            NotificationCenter.default.post(
+                name: Notification.Name("ShowError"),
+                object: nil,
+                userInfo: ["message": "文件夹不存在: \(url.path)"]
+            )
+            return
+        }
+        
+        // 检查是否有权限访问该文件夹
+        do {
+            let resourceValues = try url.resourceValues(forKeys: [.isReadableKey])
+            guard resourceValues.isReadable == true else {
+                // 通过通知传递错误信息
+                NotificationCenter.default.post(
+                    name: Notification.Name("ShowError"),
+                    object: nil,
+                    userInfo: ["message": "权限被拒绝: \(url.path)\n\n解决方法:\n1. 右键点击应用程序并选择\"打开\"\n2. 前往系统偏好设置 > 安全性与隐私 > 隐私\n3. 确保此应用程序有权访问该文件夹\n\n或者, 使用\"选择文件夹\"按钮重新选择文件夹。"]
+                )
+                return
+            }
+        } catch {
+            // 通过通知传递错误信息
+            NotificationCenter.default.post(
+                name: Notification.Name("ShowError"),
+                object: nil,
+                userInfo: ["message": "检查文件夹权限时出错: \(error.localizedDescription)"]
+            )
             return
         }
         
@@ -430,7 +481,7 @@ struct ContentView: View {
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
-        panel.prompt = "Select Folder"
+        panel.prompt = "选择文件夹"
         
         if panel.runModal() == .OK {
             folderURL = panel.url
@@ -465,10 +516,12 @@ struct ContentView: View {
             }
             
             if imageFiles.isEmpty {
-                errorMessage = "No images found in the selected folder.\nSupported formats: JPG, PNG, GIF, BMP, TIFF, WEBP"
+                errorMessage = "在所选文件夹中未找到图片。\n支持的格式: JPG, PNG, GIF, BMP, TIFF, WEBP"
             }
+        } catch let error as NSError where error.code == NSFileReadNoPermissionError {
+            errorMessage = "权限被拒绝: \(folderURL.path)\n\n解决方法:\n1. 右键点击应用程序并选择\"打开\"\n2. 前往系统偏好设置 > 安全性与隐私 > 隐私\n3. 确保此应用程序有权访问该文件夹\n\n或者, 使用\"选择文件夹\"按钮重新选择文件夹。"
         } catch {
-            errorMessage = "Error loading folder contents:\n$error.localizedDescription"
+            errorMessage = "加载文件夹内容时出错: \(error.localizedDescription)"
         }
     }
     
@@ -531,21 +584,23 @@ struct HistoryView: View {
                 }
                 .onDelete(perform: deleteItems)
             }
-            .navigationTitle("Folder History")
+            .navigationTitle("文件夹历史记录")
             .toolbar {
                 ToolbarItem(placement: .automatic) {
-                    Button("Done") {
-                        showingHistory = false
+                    HStack {
+                        Button("关闭") {
+                            showingHistory = false
+                        }
+                        .padding(.trailing, 10)
+                        
+                        Button("清除全部") {
+                            historyManager.clearHistory()
+                        }
+                        .foregroundColor(.red)
                     }
-                }
-                
-                ToolbarItem(placement: .automatic) {
-                    Button("Clear All") {
-                        historyManager.clearHistory()
-                    }
-                    .foregroundColor(.red)
                 }
             }
+
         }
         .frame(minWidth: 500, minHeight: 400)
     }
@@ -557,6 +612,41 @@ struct HistoryView: View {
             if let index = historyManager.history.firstIndex(of: url) {
                 historyManager.removeFolder(at: index)
             }
+            
+            // 通过通知传递错误信息
+            NotificationCenter.default.post(
+                name: Notification.Name("ShowError"), 
+                object: nil, 
+                userInfo: ["message": "文件夹不存在: \(url.path)"]
+            )
+            
+            showingHistory = false
+            return
+        }
+        
+        // 检查是否有权限访问该文件夹
+        do {
+            let resourceValues = try url.resourceValues(forKeys: [.isReadableKey])
+            guard resourceValues.isReadable == true else {
+                showingHistory = false
+                
+                // 通过通知传递错误信息
+                NotificationCenter.default.post(
+                    name: Notification.Name("ShowError"),
+                    object: nil,
+                    userInfo: ["message": "权限被拒绝: \(url.path)\n\n解决方法:\n1. 右键点击应用程序并选择\"打开\"\n2. 前往系统偏好设置 > 安全性与隐私 > 隐私\n3. 确保此应用程序有权访问该文件夹\n\n或者, 使用\"选择文件夹\"按钮重新选择文件夹。"]
+                )
+                return
+            }
+        } catch {
+            showingHistory = false
+            
+            // 通过通知传递错误信息
+            NotificationCenter.default.post(
+                name: Notification.Name("ShowError"),
+                object: nil,
+                userInfo: ["message": "检查文件夹权限时出错: \(error.localizedDescription)"]
+            )
             return
         }
         
