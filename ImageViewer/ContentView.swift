@@ -344,23 +344,53 @@ struct ContentView: View {
                     }
                     .padding()
                     
+                    // 默认展开显示最近文件夹历史记录
                     if !historyManager.history.isEmpty {
-                        Menu("最近的文件夹") {
-                            ForEach(0..<min(5, historyManager.history.count), id: \.self) { index in
-                                let url = historyManager.history[index]
-                                Button(url.lastPathComponent) {
-                                    loadFolderFromHistory(url)
+                        VStack {
+                            Text("最近打开的文件夹")
+                                .font(.headline)
+                                .padding(.top)
+                            
+                            ScrollView {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    ForEach(0..<min(5, historyManager.history.count), id: \.self) { index in
+                                        let url = historyManager.history[index]
+                                        Button(action: {
+                                            loadFolderFromHistory(url)
+                                        }) {
+                                            HStack {
+                                                Image(systemName: "folder")
+                                                Text(url.lastPathComponent)
+                                                    .lineLimit(1)
+                                                    .truncationMode(.middle)
+                                                Spacer()
+                                            }
+                                            .padding(.horizontal, 8)
+                                            .padding(.vertical, 4)
+                                        }
+                                        .buttonStyle(.plain)
+                                        .background(
+                                            RoundedRectangle(cornerRadius: 4)
+                                                .fill(Color(NSColor.controlBackgroundColor))
+                                                .overlay(
+                                                    RoundedRectangle(cornerRadius: 4)
+                                                        .stroke(Color(NSColor.separatorColor), lineWidth: 1)
+                                                )
+                                        )
+                                    }
                                 }
+                                .padding(.horizontal)
                             }
+                            .frame(maxHeight: 200)
                             
                             Divider()
+                                .padding(.vertical, 8)
                             
                             Button("查看全部历史记录") {
                                 showingHistory = true
                             }
+                            .padding(.bottom)
                         }
-                        .menuStyle(.borderlessButton)
-                        .padding()
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -839,6 +869,16 @@ struct ImageInfoView: View {
             }
         }
         .frame(minWidth: 400, minHeight: 300)
+        .onAppear {
+            // 注册ESC键监听
+            NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+                if event.keyCode == 53 { // ESC键的keyCode
+                    showingInfo = false
+                    return nil
+                }
+                return event
+            }
+        }
     }
 }
 
