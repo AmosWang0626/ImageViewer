@@ -512,11 +512,18 @@ struct ContentView: View {
         alert.messageText = "删除图片"
         alert.informativeText = "确定要删除图片 \"\(fileName)\" 吗？此操作会将文件移到废纸篓。"
         alert.alertStyle = .warning
-        alert.addButton(withTitle: "取消")
+        
+        // 按照macOS惯例，取消按钮在右，确认按钮在左
         alert.addButton(withTitle: "移到废纸篓")
+        alert.addButton(withTitle: "取消")
+        
+        // 设置第一个按钮为默认按钮（通过回车键触发）
+        alert.buttons[0].keyEquivalent = "\r"
+        // 设置取消按钮的快捷键为Escape
+        alert.buttons[1].keyEquivalent = "\u{1B}"
         
         let response = alert.runModal()
-        if response == .alertSecondButtonReturn {
+        if response == .alertFirstButtonReturn {
             // 先从当前列表中移除，确保UI立即更新
             imageFiles.remove(at: currentIndex)
             
