@@ -648,9 +648,12 @@ struct ContentView: View {
             if let selectedURL = panel.url {
                 // 添加到历史记录
                 historyManager.addFolder(selectedURL)
-                // 加载文件夹
-                self.folderURL = selectedURL
-                loadImagesFromFolder()
+                // 关闭历史记录视图
+                DispatchQueue.main.async {
+                    self.showingHistory = false
+                }
+                // 通知主视图加载文件夹
+                NotificationCenter.default.post(name: Notification.Name("LoadFolder"), object: nil, userInfo: ["folderURL": selectedURL])
             }
         }
     }
@@ -715,15 +718,8 @@ struct ContentView: View {
         alert.messageText = "删除图片"
         alert.informativeText = "确定要删除图片 \"\(fileName)\" 吗？此操作会将文件移到废纸篓。"
         alert.alertStyle = .warning
-        
-        // 按照macOS惯例，取消按钮在右，确认按钮在左
         alert.addButton(withTitle: "移到废纸篓")
         alert.addButton(withTitle: "取消")
-        
-        // 设置第一个按钮为默认按钮（通过回车键触发）
-        alert.buttons[0].keyEquivalent = "\r"
-        // 设置取消按钮的快捷键为Escape
-        alert.buttons[1].keyEquivalent = "\u{1B}"
         
         let response = alert.runModal()
         if response == .alertFirstButtonReturn {
@@ -745,11 +741,11 @@ struct ContentView: View {
             
             // 在后台线程中执行实际的文件移动操作
             DispatchQueue.global(qos: .background).async {
-                do {
-                    // 检查文件是否存在
-                    if FileManager.default.fileExists(atPath: removedFileURL.path) {
-                        // 将文件移到废纸篓
-                        let workspace = NSWorkspace.shared
+                // 检查文件是否存在
+                if FileManager.default.fileExists(atPath: removedFileURL.path) {
+                    // 将文件移到废纸篓
+                    let workspace = NSWorkspace.shared
+                    do {
                         _ = try workspace.recycle([removedFileURL])
                         print("文件已移到废纸篓: \(removedFileURL.path)")
                         
@@ -758,28 +754,28 @@ struct ContentView: View {
                             // 由于我们已经更新了UI，这里不需要再做任何事情
                             print("图片 \"\(fileName)\" 已成功移到废纸篓")
                         }
-                    } else {
-                        print("文件不存在: \(removedFileURL.path)")
-                    }
-                } catch let error {
-                    // 如果移动失败，在主线程中恢复UI状态
-                    DispatchQueue.main.async {
-                        // 将文件重新插入到列表中
-                        if self.currentIndex >= 0 && self.currentIndex <= self.imageFiles.count {
-                            self.imageFiles.insert(removedFileURL, at: self.currentIndex)
-                        } else {
-                            self.imageFiles.append(removedFileURL)
-                            self.currentIndex = self.imageFiles.count - 1
+                    } catch {
+                        // 如果移动失败，在主线程中恢复UI状态
+                        DispatchQueue.main.async {
+                            // 将文件重新插入到列表中
+                            if self.currentIndex >= 0 && self.currentIndex <= self.imageFiles.count {
+                                self.imageFiles.insert(removedFileURL, at: self.currentIndex)
+                            } else {
+                                self.imageFiles.append(removedFileURL)
+                                self.currentIndex = self.imageFiles.count - 1
+                            }
+                            
+                            // 显示错误信息
+                            let errorAlert = NSAlert()
+                            errorAlert.messageText = "删除失败"
+                            errorAlert.informativeText = "无法将图片 \"\(fileName)\" 移到废纸篓：\(error.localizedDescription)\n\n请确保您有权限删除此文件。"
+                            errorAlert.alertStyle = .warning
+                            errorAlert.addButton(withTitle: "确定")
+                            errorAlert.runModal()
                         }
-                        
-                        // 显示错误信息
-                        let errorAlert = NSAlert()
-                        errorAlert.messageText = "删除失败"
-                        errorAlert.informativeText = "无法将图片 \"\(fileName)\" 移到废纸篓：\(error.localizedDescription)\n\n请确保您有权限删除此文件。"
-                        errorAlert.alertStyle = .warning
-                        errorAlert.addButton(withTitle: "确定")
-                        errorAlert.runModal()
                     }
+                } else {
+                    print("文件不存在: \(removedFileURL.path)")
                 }
             }
         }
@@ -1200,7 +1196,9 @@ struct HistoryView: View {
                 userInfo: ["message": "文件夹不存在: \(url.path)"]
             )
             
-            showingHistory = false
+            DispatchQueue.main.async {
+                self.showingHistory = false
+            }
             return
         }
         
@@ -1209,9 +1207,9 @@ struct HistoryView: View {
             let resourceValues = try url.resourceValues(forKeys: [.isReadableKey])
             guard resourceValues.isReadable == true else {
                 // 权限不足，提供友好的解决方案
-                showingHistory = false
-                
                 DispatchQueue.main.async {
+                    self.showingHistory = false
+                
                     let alert = NSAlert()
                     alert.messageText = "访问被拒绝"
                     alert.informativeText = "没有权限访问文件夹 \"\(url.lastPathComponent)\"。\n\n解决方案：\n1. 点击下方的\"重新选择文件夹\"按钮\n2. 在弹出的文件选择对话框中点击\"打开\"以授予权限"
@@ -1228,19 +1226,23 @@ struct HistoryView: View {
                 return
             }
         } catch {
-            showingHistory = false
+            DispatchQueue.main.async {
+                self.showingHistory = false
             
-            // 通过通知传递错误信息
-            NotificationCenter.default.post(
-                name: Notification.Name("ShowError"),
-                object: nil,
-                userInfo: ["message": "检查文件夹权限时出错: \(error.localizedDescription)"]
-            )
+                // 通过通知传递错误信息
+                NotificationCenter.default.post(
+                    name: Notification.Name("ShowError"),
+                    object: nil,
+                    userInfo: ["message": "检查文件夹权限时出错: \(error.localizedDescription)"]
+                )
+            }
             return
         }
         
         // 关闭历史记录视图
-        showingHistory = false
+        DispatchQueue.main.async {
+            self.showingHistory = false
+        }
         
         // 通知主视图加载文件夹
         NotificationCenter.default.post(name: Notification.Name("LoadFolder"), object: nil, userInfo: ["folderURL": url])
