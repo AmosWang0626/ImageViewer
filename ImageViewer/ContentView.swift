@@ -386,10 +386,11 @@ struct ContentView: View {
                             Divider()
                                 .padding(.vertical, 8)
                             
-                            Button("查看全部历史记录") {
-                                showingHistory = true
+                            Button("选择其他文件夹") {
+                                selectFolder()
                             }
                             .padding(.bottom)
+
                         }
                     }
                 }
@@ -442,7 +443,7 @@ struct ContentView: View {
     }
     
     func loadFolderFromHistory(_ url: URL) {
-        // 从历史记录加载文件夹
+        // 检查文件夹是否存在
         guard FileManager.default.fileExists(atPath: url.path) else {
             // 如果文件夹不存在，从历史记录中移除
             historyManager.removeFolder(url)
@@ -458,14 +459,21 @@ struct ContentView: View {
         
         // 检查是否有权限访问该文件夹
         do {
-            let resourceValues = try url.resourceValues(forKeys: [.isReadableKey])
+            let resourceValues = try url.resourceValues(forKeys: [.isReadableKey, .isWritableKey])
             guard resourceValues.isReadable == true else {
-                // 通过通知传递错误信息
-                NotificationCenter.default.post(
-                    name: Notification.Name("ShowError"),
-                    object: nil,
-                    userInfo: ["message": "权限被拒绝: \(url.path)\n\n解决方法:\n1. 右键点击应用程序并选择\"打开\"\n2. 前往系统偏好设置 > 安全性与隐私 > 隐私\n3. 确保此应用程序有权访问该文件夹\n\n或者, 使用\"选择文件夹\"按钮重新选择文件夹。"]
-                )
+                // 如果没有读取权限，显示友好的错误信息和解决方案
+                let alert = NSAlert()
+                alert.messageText = "访问被拒绝"
+                alert.informativeText = "没有权限访问文件夹 \"\(url.lastPathComponent)\"。\n\n解决方案：\n1. 点击下方的\"打开文件夹\"按钮重新选择该文件夹\n2. 在弹出的文件选择对话框中点击\"打开\"以授予权限"
+                alert.alertStyle = .warning
+                alert.addButton(withTitle: "打开文件夹")
+                alert.addButton(withTitle: "取消")
+                
+                let response = alert.runModal()
+                if response == .alertFirstButtonReturn {
+                    // 用户选择重新选择文件夹
+                    selectSpecificFolder(url)
+                }
                 return
             }
         } catch {
@@ -480,6 +488,25 @@ struct ContentView: View {
         
         folderURL = url
         loadImagesFromFolder()
+    }
+    
+    func selectSpecificFolder(_ folderURL: URL) {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.prompt = "打开"
+        panel.directoryURL = folderURL
+        
+        if panel.runModal() == .OK {
+            if let selectedURL = panel.url {
+                // 添加到历史记录
+                historyManager.addFolder(selectedURL)
+                // 加载文件夹
+                self.folderURL = selectedURL
+                loadImagesFromFolder()
+            }
+        }
     }
     
     func rotationScaleFactor() -> CGFloat {
