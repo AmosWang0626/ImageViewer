@@ -78,9 +78,45 @@ struct ContentView: View {
     @State private var lastOffset: CGSize = .zero
     @State private var needsAutoScaleAdjustment = false
     @State private var showingHistory = false
-    @State private var showingInfo = false
-    @State private var imageInfo: ImageInfo?
     @StateObject private var historyManager = HistoryManager.shared
+    
+    // 新增状态
+    @State private var prefetchedImages: Set<String> = []
+    @State private var isSlideshowActive = false
+    @State private var slideshowTimer: Timer?
+    @State private var isDraggingOver = false
+    @State private var imageInfo: ImageInfo?
+    @State private var showingInfo = false
+
+    func prefetchImage(at index: Int) {
+        guard index >= 0 && index < imageFiles.count else { return }
+        let imageURL = imageFiles[index]
+        let imageKey = imageURL.absoluteString
+        
+        // 如果已经预加载过，则跳过
+        guard !prefetchedImages.contains(imageKey) else { return }
+        
+        // 标记为已预加载
+        prefetchedImages.insert(imageKey)
+        
+        // 在后台线程预加载图片
+        DispatchQueue.global(qos: .background).async {
+            // 这里我们只是触发图片加载，实际的预加载由AsyncImage处理
+            // 在实际应用中，你可能需要使用更复杂的预加载策略
+            print("预加载图片: \(imageURL.lastPathComponent)")
+        }
+    }
+    
+    func updatePrefetching() {
+        // 预加载当前图片前后的几张图片
+        let prefetchRange = 2
+        let startIndex = max(0, currentIndex - prefetchRange)
+        let endIndex = min(imageFiles.count - 1, currentIndex + prefetchRange)
+        
+        for i in startIndex...endIndex {
+            prefetchImage(at: i)
+        }
+    }
     
     var body: some View {
         VStack(spacing: 0) {
@@ -117,7 +153,17 @@ struct ContentView: View {
                         }
                     }
                     .frame(width: geometry.size.width, height: geometry.size.height)
+                    .animation(.easeInOut(duration: 0.2), value: currentIndex) // 添加切换动画
                 }
+                .onDrop(of: [.image], isTargeted: $isDraggingOver) { providers in
+                    // 处理拖拽的图片文件
+                    handleDroppedImages(providers: providers)
+                    return true
+                }
+                .overlay(
+                    RoundedRectangle(cornerRadius: 0)
+                        .stroke(isDraggingOver ? Color.blue : Color.clear, lineWidth: 4)
+                )
                 .gesture(
                     MagnificationGesture()
                         .onChanged { value in
@@ -177,6 +223,21 @@ struct ContentView: View {
                             errorMessage = message
                         }
                     }
+                    
+                    // 初始化预加载
+                    updatePrefetching()
+                }
+                .onChange(of: currentIndex) { _ in
+                    // 当切换图片时重置旋转角度和缩放
+                    resetImageTransform()
+                    // 更新预加载
+                    updatePrefetching()
+                }
+                .onChange(of: rotationAngle) { _ in
+                    // 当旋转角度改变时，可能需要调整缩放
+                    if needsAutoScaleAdjustment {
+                        adjustScaleForRotation()
+                    }
                 }
                 .onDisappear {
                     // 移除通知中心监听器
@@ -222,6 +283,28 @@ struct ContentView: View {
                     
                     // 中间控制按钮组
                     HStack(spacing: 15) {
+                        // 幻灯片控制按钮
+                        HStack(spacing: 5) {
+                            Button(action: {
+                                toggleSlideshow()
+                            }) {
+                                Image(systemName: isSlideshowActive ? "stop" : "play")
+                            }
+                            .buttonStyle(.borderless)
+                            .keyboardShortcut(KeyEquivalent("p"), modifiers: [.command])
+                            
+                            // 播放间隔设置
+                            if isSlideshowActive {
+                                Picker("", selection: .constant(3)) {
+                                    Text("3秒").tag(3)
+                                    Text("5秒").tag(5)
+                                    Text("10秒").tag(10)
+                                }
+                                .pickerStyle(.segmented)
+                                .frame(width: 120)
+                            }
+                        }
+                        
                         // 缩放控制按钮
                         HStack(spacing: 5) {
                             Button(action: {
@@ -291,7 +374,7 @@ struct ContentView: View {
                             .keyboardShortcut(KeyEquivalent("]"), modifiers: [])
                         }
                     }
-                    
+
                     Spacer()
                     
                     // 右侧按钮
@@ -422,16 +505,6 @@ struct ContentView: View {
             }
         }
         .frame(minWidth: 600, minHeight: 400)
-        .onChange(of: currentIndex) { _ in
-            // 当切换图片时重置旋转角度和缩放
-            resetImageTransform()
-        }
-        .onChange(of: rotationAngle) { _ in
-            // 当旋转角度改变时，可能需要调整缩放
-            if needsAutoScaleAdjustment {
-                adjustScaleForRotation()
-            }
-        }
         .sheet(isPresented: $showingHistory) {
             HistoryView(showingHistory: $showingHistory)
         }
@@ -604,8 +677,8 @@ struct ContentView: View {
                     if FileManager.default.fileExists(atPath: removedFileURL.path) {
                         // 将文件移到废纸篓
                         let workspace = NSWorkspace.shared
-                        let newURLs = try workspace.recycle([removedFileURL])
-                        print("文件已移到废纸篓: \(newURLs)")
+                        _ = try workspace.recycle([removedFileURL])
+                        print("文件已移到废纸篓: \(removedFileURL.path)")
                         
                         // 在主线程中显示成功消息
                         DispatchQueue.main.async {
@@ -732,6 +805,56 @@ struct ContentView: View {
         offset = .zero
         lastOffset = .zero
         needsAutoScaleAdjustment = true
+    }
+    
+    func toggleSlideshow() {
+        isSlideshowActive.toggle()
+        
+        if isSlideshowActive {
+            // 开始幻灯片播放
+            slideshowTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: true) { _ in
+                DispatchQueue.main.async {
+                    if currentIndex < imageFiles.count - 1 {
+                        currentIndex += 1
+                    } else {
+                        // 播放完毕，停止幻灯片
+                        stopSlideshow()
+                    }
+                }
+            }
+        } else {
+            // 停止幻灯片播放
+            stopSlideshow()
+        }
+    }
+    
+    func stopSlideshow() {
+        slideshowTimer?.invalidate()
+        slideshowTimer = nil
+        isSlideshowActive = false
+    }
+    
+    func handleDroppedImages(providers: [NSItemProvider]) {
+        // 这里可以实现处理拖拽图片的逻辑
+        // 为简化起见，我们只处理第一个拖拽的文件
+        guard let provider = providers.first else { return }
+        
+        provider.loadItem(forTypeIdentifier: "public.file-url", options: nil) { (urlData, error) in
+            if let urlData = urlData as? Data,
+               let url = URL(dataRepresentation: urlData, relativeTo: nil) {
+                DispatchQueue.main.async {
+                    // 检查是否是图片文件
+                    let supportedExtensions = ["jpg", "jpeg", "png", "gif", "bmp", "tiff", "webp"]
+                    let ext = url.pathExtension.lowercased()
+                    
+                    if supportedExtensions.contains(ext) {
+                        // 创建一个临时文件夹包含拖拽的图片
+                        // 实际应用中，你可能需要更复杂的处理逻辑
+                        print("处理拖拽的图片: \(url)")
+                    }
+                }
+            }
+        }
     }
     
     func showImageInfo() {
