@@ -439,33 +439,49 @@ struct ContentView: View {
                                     ForEach(0..<min(5, historyManager.history.count), id: \.self) { index in
                                         let url = historyManager.history[index]
                                         Button(action: {
-                                            loadFolderFromHistory(url)
+                                            loadFolderFromHistoryWithPermissionCheck(url)
                                         }) {
                                             HStack {
                                                 Image(systemName: "folder")
-                                                Text(url.lastPathComponent)
-                                                    .lineLimit(1)
-                                                    .truncationMode(.middle)
+                                                    .foregroundColor(.blue)
+                                                VStack(alignment: .leading, spacing: 2) {
+                                                    Text(url.lastPathComponent)
+                                                        .font(.body)
+                                                        .fontWeight(.medium)
+                                                        .lineLimit(1)
+                                                        .truncationMode(.middle)
+                                                    Text(url.path)
+                                                        .font(.caption)
+                                                        .foregroundColor(.secondary)
+                                                        .lineLimit(1)
+                                                        .truncationMode(.head)
+                                                }
                                                 Spacer()
+                                                // 显示权限状态图标
+                                                if !hasAccessToFolder(url) {
+                                                    Image(systemName: "exclamationmark.triangle")
+                                                        .foregroundColor(.orange)
+                                                }
                                             }
-                                            .padding(.horizontal, 8)
-                                            .padding(.vertical, 4)
+                                            .padding(.horizontal, 12)
+                                            .padding(.vertical, 8)
                                         }
                                         .buttonStyle(.plain)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
                                         .background(
-                                            RoundedRectangle(cornerRadius: 4)
+                                            RoundedRectangle(cornerRadius: 6)
                                                 .fill(Color(NSColor.controlBackgroundColor))
                                                 .overlay(
-                                                    RoundedRectangle(cornerRadius: 4)
-                                                        .stroke(Color(NSColor.separatorColor), lineWidth: 1)
+                                                    RoundedRectangle(cornerRadius: 6)
+                                                        .stroke(hasAccessToFolder(url) ? Color(NSColor.separatorColor) : Color.orange, lineWidth: 1)
                                                 )
                                         )
                                     }
                                 }
                                 .padding(.horizontal)
                             }
-                            .frame(maxHeight: 200)
-                            
+                            .frame(maxWidth: .infinity, maxHeight: 200)
+
                             Divider()
                                 .padding(.vertical, 8)
                             
@@ -563,6 +579,63 @@ struct ContentView: View {
         loadImagesFromFolder()
     }
     
+    func loadFolderFromHistoryWithPermissionCheck(_ url: URL) {
+        // 检查文件夹是否存在
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            // 如果文件夹不存在，从历史记录中移除
+            historyManager.removeFolder(url)
+            
+            // 通过通知传递错误信息
+            NotificationCenter.default.post(
+                name: Notification.Name("ShowError"),
+                object: nil,
+                userInfo: ["message": "文件夹不存在: \(url.path)"]
+            )
+            return
+        }
+        
+        // 检查是否有权限访问该文件夹
+        do {
+            let resourceValues = try url.resourceValues(forKeys: [.isReadableKey])
+            guard resourceValues.isReadable == true else {
+                // 权限不足，提供友好的解决方案
+                let alert = NSAlert()
+                alert.messageText = "访问被拒绝"
+                alert.informativeText = "没有权限访问文件夹 \"\(url.lastPathComponent)\"。\n\n解决方案：\n1. 点击下方的\"重新选择文件夹\"按钮\n2. 在弹出的文件选择对话框中点击\"打开\"以授予权限"
+                alert.alertStyle = .warning
+                alert.addButton(withTitle: "重新选择文件夹")
+                alert.addButton(withTitle: "取消")
+                
+                let response = alert.runModal()
+                if response == .alertFirstButtonReturn {
+                    // 用户选择重新选择文件夹
+                    selectSpecificFolder(url)
+                }
+                return
+            }
+        } catch {
+            // 通过通知传递错误信息
+            NotificationCenter.default.post(
+                name: Notification.Name("ShowError"),
+                object: nil,
+                userInfo: ["message": "检查文件夹权限时出错: \(error.localizedDescription)"]
+            )
+            return
+        }
+        
+        folderURL = url
+        loadImagesFromFolder()
+    }
+    
+    func hasAccessToFolder(_ url: URL) -> Bool {
+        do {
+            let resourceValues = try url.resourceValues(forKeys: [.isReadableKey])
+            return resourceValues.isReadable == true
+        } catch {
+            return false
+        }
+    }
+    
     func selectSpecificFolder(_ folderURL: URL) {
         let panel = NSOpenPanel()
         panel.canChooseFiles = false
@@ -581,7 +654,7 @@ struct ContentView: View {
             }
         }
     }
-    
+
     func rotationScaleFactor() -> CGFloat {
         // 根据旋转角度计算额外的缩放因子
         let normalizedAngle = abs(rotationAngle.truncatingRemainder(dividingBy: 360))
@@ -1043,16 +1116,33 @@ struct HistoryView: View {
             List {
                 ForEach(Array(historyManager.history.enumerated()), id: \.1) { index, url in
                     HStack {
-                        VStack(alignment: .leading) {
-                            Text(url.lastPathComponent)
-                                .font(.headline)
-                            Text(url.path)
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                                .lineLimit(1)
+                        HStack {
+                            Image(systemName: "folder")
+                                .foregroundColor(.blue)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(url.lastPathComponent)
+                                    .font(.body)
+                                    .fontWeight(.medium)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                                Text(url.path)
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                    .lineLimit(1)
+                                    .truncationMode(.head)
+                            }
+                            Spacer()
+                            // 显示权限状态图标
+                            if !hasAccessToFolder(url) {
+                                Image(systemName: "exclamationmark.triangle")
+                                    .foregroundColor(.orange)
+                            }
                         }
-                        
-                        Spacer()
+                        .frame(maxWidth: .infinity)
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            loadFolder(url)
+                        }
                         
                         Button(action: {
                             historyManager.removeFolder(at: index)
@@ -1061,10 +1151,6 @@ struct HistoryView: View {
                         }
                         .buttonStyle(.borderless)
                         .foregroundColor(.red)
-                    }
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        loadFolder(url)
                     }
                 }
                 .onDelete(perform: deleteItems)
@@ -1090,6 +1176,15 @@ struct HistoryView: View {
         .frame(minWidth: 500, minHeight: 400)
     }
     
+    func hasAccessToFolder(_ url: URL) -> Bool {
+        do {
+            let resourceValues = try url.resourceValues(forKeys: [.isReadableKey])
+            return resourceValues.isReadable == true
+        } catch {
+            return false
+        }
+    }
+    
     func loadFolder(_ url: URL) {
         // 加载选中的文件夹
         guard FileManager.default.fileExists(atPath: url.path) else {
@@ -1113,14 +1208,23 @@ struct HistoryView: View {
         do {
             let resourceValues = try url.resourceValues(forKeys: [.isReadableKey])
             guard resourceValues.isReadable == true else {
+                // 权限不足，提供友好的解决方案
                 showingHistory = false
                 
-                // 通过通知传递错误信息
-                NotificationCenter.default.post(
-                    name: Notification.Name("ShowError"),
-                    object: nil,
-                    userInfo: ["message": "权限被拒绝: \(url.path)\n\n解决方法:\n1. 右键点击应用程序并选择\"打开\"\n2. 前往系统偏好设置 > 安全性与隐私 > 隐私\n3. 确保此应用程序有权访问该文件夹\n\n或者, 使用\"选择文件夹\"按钮重新选择文件夹。"]
-                )
+                DispatchQueue.main.async {
+                    let alert = NSAlert()
+                    alert.messageText = "访问被拒绝"
+                    alert.informativeText = "没有权限访问文件夹 \"\(url.lastPathComponent)\"。\n\n解决方案：\n1. 点击下方的\"重新选择文件夹\"按钮\n2. 在弹出的文件选择对话框中点击\"打开\"以授予权限"
+                    alert.alertStyle = .warning
+                    alert.addButton(withTitle: "重新选择文件夹")
+                    alert.addButton(withTitle: "取消")
+                    
+                    let response = alert.runModal()
+                    if response == .alertFirstButtonReturn {
+                        // 用户选择重新选择文件夹
+                        self.selectSpecificFolder(url)
+                    }
+                }
                 return
             }
         } catch {
@@ -1140,6 +1244,26 @@ struct HistoryView: View {
         
         // 通知主视图加载文件夹
         NotificationCenter.default.post(name: Notification.Name("LoadFolder"), object: nil, userInfo: ["folderURL": url])
+    }
+    
+    func selectSpecificFolder(_ folderURL: URL) {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.prompt = "打开"
+        panel.directoryURL = folderURL
+        
+        if panel.runModal() == .OK {
+            if let selectedURL = panel.url {
+                // 添加到历史记录
+                historyManager.addFolder(selectedURL)
+                // 关闭历史记录视图
+                showingHistory = false
+                // 通知主视图加载文件夹
+                NotificationCenter.default.post(name: Notification.Name("LoadFolder"), object: nil, userInfo: ["folderURL": selectedURL])
+            }
+        }
     }
     
     func deleteItems(offsets: IndexSet) {
