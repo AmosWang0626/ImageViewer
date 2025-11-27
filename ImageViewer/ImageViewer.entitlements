@@ -4,15 +4,15 @@
 <dict>
     <key>com.apple.security.app-sandbox</key>
     <true/>
-    <key>com.apple.security.files.user-selected.read-only</key>
+    <key>com.apple.security.files.user-selected.read-write</key>
     <true/>
-    <key>com.apple.security.files.downloads.read-only</key>
+    <key>com.apple.security.files.downloads.read-write</key>
     <true/>
-    <key>com.apple.security.files.pictures.read-only</key>
+    <key>com.apple.security.files.pictures.read-write</key>
     <true/>
-    <key>com.apple.security.files.desktop.read-only</key>
+    <key>com.apple.security.files.desktop.read-write</key>
     <true/>
-    <key>com.apple.security.files.documents.read-only</key>
+    <key>com.apple.security.files.documents.read-write</key>
     <true/>
 </dict>
 </plist>

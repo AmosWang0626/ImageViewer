@@ -8,6 +8,7 @@
 import SwiftUI
 import AppKit
 import Foundation
+import ImageIO
 
 // MARK: - HistoryManager
 class HistoryManager: ObservableObject {
@@ -77,6 +78,8 @@ struct ContentView: View {
     @State private var lastOffset: CGSize = .zero
     @State private var needsAutoScaleAdjustment = false
     @State private var showingHistory = false
+    @State private var showingInfo = false
+    @State private var imageInfo: ImageInfo?
     @StateObject private var historyManager = HistoryManager.shared
     
     var body: some View {
@@ -175,7 +178,15 @@ struct ContentView: View {
                         }
                     }
                 }
-                
+                .onDisappear {
+                    // 移除通知中心监听器
+                    NotificationCenter.default.removeObserver(self)
+                }
+                .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
+                    // 移除通知中心监听器
+                    NotificationCenter.default.removeObserver(self)
+                }
+
                 // 底部状态栏
                 HStack {
                     Text(imageFiles[currentIndex].lastPathComponent)
@@ -293,6 +304,13 @@ struct ContentView: View {
                         .buttonStyle(.borderless)
                         .keyboardShortcut("h", modifiers: [.command])
                         
+                        Button(action: {
+                            showImageInfo()
+                        }) {
+                            Image(systemName: "info.circle")
+                        }
+                        .buttonStyle(.borderless)
+                        
                         Button("更换文件夹") {
                             selectFolder()
                         }
@@ -306,7 +324,7 @@ struct ContentView: View {
                         .keyboardShortcut(KeyEquivalent.rightArrow, modifiers: [])
                         .disabled(currentIndex == imageFiles.count - 1)
                     }
-                    .padding(.trailing, 10)
+
                 }
                 .padding(.vertical, 10)
                 .background(Color(NSColor.windowBackgroundColor))
@@ -383,12 +401,13 @@ struct ContentView: View {
                 adjustScaleForRotation()
             }
         }
-        .onDisappear {
-            // 移除通知中心监听器
-            NotificationCenter.default.removeObserver(self)
-        }
         .sheet(isPresented: $showingHistory) {
             HistoryView(showingHistory: $showingHistory)
+        }
+        .sheet(isPresented: $showingInfo) {
+            if let info = imageInfo {
+                ImageInfoView(info: info, showingInfo: $showingInfo)
+            }
         }
     }
     
@@ -471,8 +490,113 @@ struct ContentView: View {
             rotationAngle -= 90
         case 125: // 下箭头键
             rotationAngle += 90
+        case 51: // Delete键
+            deleteCurrentImage()
         default:
             break
+        }
+    }
+    
+    func deleteCurrentImage() {
+        // 确保有图片可以删除
+        guard !imageFiles.isEmpty && currentIndex >= 0 && currentIndex < imageFiles.count else {
+            print("没有图片可以删除或索引无效")
+            return
+        }
+        
+        let fileURL = imageFiles[currentIndex]
+        let fileName = fileURL.lastPathComponent
+        
+        // 确认删除操作
+        let alert = NSAlert()
+        alert.messageText = "删除图片"
+        alert.informativeText = "确定要删除图片 \"\(fileName)\" 吗？此操作会将文件移到废纸篓。"
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "取消")
+        alert.addButton(withTitle: "移到废纸篓")
+        
+        let response = alert.runModal()
+        if response == .alertSecondButtonReturn {
+            // 先从当前列表中移除，确保UI立即更新
+            imageFiles.remove(at: currentIndex)
+            
+            // 保存被删除的文件URL，用于可能的错误恢复
+            let removedFileURL = fileURL
+            
+            // 调整当前索引
+            if imageFiles.isEmpty {
+                // 如果没有更多图片，重置状态
+                currentIndex = 0
+                resetImageTransform()
+            } else if currentIndex >= imageFiles.count {
+                // 如果当前索引超出了范围，则调整到最后一张图片
+                currentIndex = imageFiles.count - 1
+            }
+            
+            // 在后台线程中执行实际的文件移动操作
+            DispatchQueue.global(qos: .background).async {
+                do {
+                    // 检查文件是否存在
+                    if FileManager.default.fileExists(atPath: removedFileURL.path) {
+                        // 将文件移到废纸篓
+                        let workspace = NSWorkspace.shared
+                        let newURLs = try workspace.recycle([removedFileURL])
+                        print("文件已移到废纸篓: \(newURLs)")
+                        
+                        // 在主线程中显示成功消息
+                        DispatchQueue.main.async {
+                            // 由于我们已经更新了UI，这里不需要再做任何事情
+                            print("图片 \"\(fileName)\" 已成功移到废纸篓")
+                        }
+                    } else {
+                        print("文件不存在: \(removedFileURL.path)")
+                    }
+                } catch let error {
+                    // 如果移动失败，在主线程中恢复UI状态
+                    DispatchQueue.main.async {
+                        // 将文件重新插入到列表中
+                        if self.currentIndex >= 0 && self.currentIndex <= self.imageFiles.count {
+                            self.imageFiles.insert(removedFileURL, at: self.currentIndex)
+                        } else {
+                            self.imageFiles.append(removedFileURL)
+                            self.currentIndex = self.imageFiles.count - 1
+                        }
+                        
+                        // 显示错误信息
+                        let errorAlert = NSAlert()
+                        errorAlert.messageText = "删除失败"
+                        errorAlert.informativeText = "无法将图片 \"\(fileName)\" 移到废纸篓：\(error.localizedDescription)\n\n请确保您有权限删除此文件。"
+                        errorAlert.alertStyle = .warning
+                        errorAlert.addButton(withTitle: "确定")
+                        errorAlert.runModal()
+                    }
+                }
+            }
+        }
+    }
+    
+    func handleFileNotFoundError(fileName: String, index: Int) {
+        // 从图片列表中移除不存在的文件
+        if index >= 0 && index < imageFiles.count {
+            imageFiles.remove(at: index)
+        }
+        
+        let errorAlert = NSAlert()
+        errorAlert.messageText = "文件不存在"
+        errorAlert.informativeText = "文件 \"\(fileName)\" 不存在或已被删除。"
+        errorAlert.alertStyle = .warning
+        errorAlert.addButton(withTitle: "确定")
+        errorAlert.runModal()
+        
+        // 调整当前索引
+        if imageFiles.isEmpty {
+            resetImageTransform()
+        } else {
+            if currentIndex >= imageFiles.count {
+                currentIndex = max(0, imageFiles.count - 1)
+            } else if currentIndex < 0 {
+                currentIndex = 0
+            }
         }
     }
     
@@ -544,6 +668,170 @@ struct ContentView: View {
         offset = .zero
         lastOffset = .zero
         needsAutoScaleAdjustment = true
+    }
+    
+    func showImageInfo() {
+        guard !imageFiles.isEmpty && currentIndex < imageFiles.count else { return }
+        
+        let fileURL = imageFiles[currentIndex]
+        
+        // 立即显示基础信息窗口，提升响应性
+        let fileName = fileURL.lastPathComponent
+        imageInfo = ImageInfo(
+            fileName: fileName,
+            fileSize: "获取中...",
+            dimensions: "获取中...",
+            creationDate: "获取中...",
+            modificationDate: "获取中..."
+        )
+        showingInfo = true
+        
+        // 将所有操作都放到后台线程执行，避免阻塞主线程
+        DispatchQueue.global(qos: .userInitiated).async {
+            // 初始化默认值
+            var fileSize = "未知"
+            var creationDate = "未知"
+            var modificationDate = "未知"
+            var dimensions = "未知"
+            
+            do {
+                // 获取文件属性
+                let attributes = try FileManager.default.attributesOfItem(atPath: fileURL.path)
+                
+                // 文件大小
+                if let size = attributes[.size] as? NSNumber {
+                    fileSize = self.formatFileSize(size.intValue)
+                }
+                
+                // 创建日期和修改日期（使用中文格式）
+                if let cDate = attributes[.creationDate] as? Date {
+                    let formatter = DateFormatter()
+                    formatter.locale = Locale(identifier: "zh_CN")
+                    formatter.dateFormat = "yyyy年MM月dd日 HH:mm:ss"
+                    creationDate = formatter.string(from: cDate)
+                }
+                
+                if let mDate = attributes[.modificationDate] as? Date {
+                    let formatter = DateFormatter()
+                    formatter.locale = Locale(identifier: "zh_CN")
+                    formatter.dateFormat = "yyyy年MM月dd日 HH:mm:ss"
+                    modificationDate = formatter.string(from: mDate)
+                }
+                
+                // 图片尺寸
+                if let imageSource = CGImageSourceCreateWithURL(fileURL as CFURL, nil),
+                   let properties = CGImageSourceCopyPropertiesAtIndex(imageSource, 0, nil) as? [String: Any],
+                   let width = properties[kCGImagePropertyPixelWidth as String] as? NSNumber,
+                   let height = properties[kCGImagePropertyPixelHeight as String] as? NSNumber {
+                    dimensions = "\(width.intValue) × \(height.intValue)"
+                }
+            } catch let error {
+                fileSize = "获取失败"
+                dimensions = "获取失败"
+                creationDate = "获取失败"
+                modificationDate = "获取失败"
+                
+                // 在主线程中显示错误（使用温和的方式）
+                DispatchQueue.main.async {
+                    print("获取图片信息失败: \(error.localizedDescription)")
+                }
+            }
+            
+            // 在主线程中更新UI
+            DispatchQueue.main.async {
+                self.imageInfo = ImageInfo(
+                    fileName: fileName,
+                    fileSize: fileSize,
+                    dimensions: dimensions,
+                    creationDate: creationDate,
+                    modificationDate: modificationDate
+                )
+            }
+        }
+    }
+    
+    func formatFileSize(_ size: Int) -> String {
+        let formatter = ByteCountFormatter()
+        formatter.allowedUnits = [.useKB, .useMB, .useGB]
+        formatter.countStyle = .file
+        return formatter.string(fromByteCount: Int64(size))
+    }
+
+}
+
+struct ImageInfo {
+    let fileName: String
+    let fileSize: String
+    let dimensions: String
+    let creationDate: String
+    let modificationDate: String
+}
+
+struct ImageInfoView: View {
+    let info: ImageInfo
+    @Binding var showingInfo: Bool
+    
+    var body: some View {
+        VStack {
+            VStack(alignment: .leading, spacing: 16) {
+                HStack {
+                    Image(systemName: "photo")
+                        .font(.largeTitle)
+                        .foregroundColor(.blue)
+                    
+                    Text(info.fileName)
+                        .font(.title2)
+                        .fontWeight(.bold)
+                }
+                
+                Divider()
+                
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text("文件大小:")
+                            .fontWeight(.semibold)
+                            .frame(width: 100, alignment: .leading)
+                        Text(info.fileSize)
+                    }
+                    
+                    HStack {
+                        Text("尺寸:")
+                            .fontWeight(.semibold)
+                            .frame(width: 100, alignment: .leading)
+                        Text(info.dimensions)
+                    }
+                    
+                    HStack {
+                        Text("创建时间:")
+                            .fontWeight(.semibold)
+                            .frame(width: 100, alignment: .leading)
+                        Text(info.creationDate)
+                    }
+                    
+                    HStack {
+                        Text("修改时间:")
+                            .fontWeight(.semibold)
+                            .frame(width: 100, alignment: .leading)
+                        Text(info.modificationDate)
+                    }
+                }
+                .padding(.horizontal)
+                
+                Spacer()
+            }
+            .padding()
+            
+            Divider()
+            
+            HStack {
+                Spacer()
+                Button("关闭") {
+                    showingInfo = false
+                }
+                .padding()
+            }
+        }
+        .frame(minWidth: 400, minHeight: 300)
     }
 }
 
@@ -669,3 +957,7 @@ struct ContentView_Previews: PreviewProvider {
         ContentView()
     }
 }
+
+
+
+
