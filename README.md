@@ -6,7 +6,7 @@
 
 ### 图片浏览
 - 选择本地文件夹加载图片
-- 支持常见图片格式：JPG, JPEG, PNG, GIF, BMP, TIFF, WEBP
+- 支持常见图片格式：JPG, JPEG, PNG, GIF, BMP, TIFF, WEBP, HIF, CR3
 - 图片按文件名字母顺序排序显示
 
 ### 历史记录

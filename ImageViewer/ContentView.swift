@@ -825,7 +825,7 @@ struct ContentView: View {
     func loadImagesFromFolder() {
         guard let folderURL = folderURL else { return }
         
-        let supportedExtensions = ["jpg", "jpeg", "png", "gif", "bmp", "tiff", "webp"]
+        let supportedExtensions = ["jpg", "jpeg", "png", "gif", "bmp", "tiff", "webp", "hif", "cr3"]
         imageFiles = []
         currentIndex = 0
         errorMessage = nil
@@ -846,7 +846,7 @@ struct ContentView: View {
             }
             
             if imageFiles.isEmpty {
-                errorMessage = "在所选文件夹中未找到图片。\n支持的格式: JPG, PNG, GIF, BMP, TIFF, WEBP"
+                errorMessage = "在所选文件夹中未找到图片。\n支持的格式: JPG, PNG, GIF, BMP, TIFF, WEBP, HIF, CR3"
             }
         } catch let error as NSError where error.code == NSFileReadNoPermissionError {
             errorMessage = "权限被拒绝: \(folderURL.path)\n\n解决方法:\n1. 右键点击应用程序并选择\"打开\"\n2. 前往系统偏好设置 > 安全性与隐私 > 隐私\n3. 确保此应用程序有权访问该文件夹\n\n或者, 使用\"选择文件夹\"按钮重新选择文件夹。"
@@ -913,7 +913,7 @@ struct ContentView: View {
                let url = URL(dataRepresentation: urlData, relativeTo: nil) {
                 DispatchQueue.main.async {
                     // 检查是否是图片文件
-                    let supportedExtensions = ["jpg", "jpeg", "png", "gif", "bmp", "tiff", "webp"]
+                    let supportedExtensions = ["jpg", "jpeg", "png", "gif", "bmp", "tiff", "webp", "hif", "cr3"]
                     let ext = url.pathExtension.lowercased()
                     
                     if supportedExtensions.contains(ext) {
