@@ -9,6 +9,7 @@ import SwiftUI
 import AppKit
 import Foundation
 import ImageIO
+import AVKit
 
 // MARK: - HistoryManager
 class HistoryManager: ObservableObject {
@@ -141,15 +142,22 @@ struct ContentView: View {
                 // 主要图片显示区域
                 GeometryReader { geometry in
                     ZStack {
-                        AsyncImage(url: imageFiles[currentIndex]) { image in
-                            image
-                                .resizable()
-                                .aspectRatio(contentMode: .fit)
-                                .rotationEffect(.degrees(rotationAngle))
-                                .scaleEffect(scale * rotationScaleFactor())
-                                .offset(offset)
-                        } placeholder: {
-                            ProgressView()
+                        // 根据文件扩展名决定显示图片还是视频
+                        if isVideoFile(imageFiles[currentIndex]) {
+                            // 视频播放区域
+                            VideoPlayerView(url: imageFiles[currentIndex])
+                        } else {
+                            // 图片显示区域
+                            AsyncImage(url: imageFiles[currentIndex]) { image in
+                                image
+                                    .resizable()
+                                    .aspectRatio(contentMode: .fit)
+                                    .rotationEffect(.degrees(rotationAngle))
+                                    .scaleEffect(scale * rotationScaleFactor())
+                                    .offset(offset)
+                            } placeholder: {
+                                ProgressView()
+                            }
                         }
                     }
                     .frame(width: geometry.size.width, height: geometry.size.height)
@@ -825,7 +833,7 @@ struct ContentView: View {
     func loadImagesFromFolder() {
         guard let folderURL = folderURL else { return }
         
-        let supportedExtensions = ["jpg", "jpeg", "png", "gif", "bmp", "tiff", "webp", "hif", "cr3"]
+        let supportedExtensions = ["jpg", "jpeg", "png", "gif", "bmp", "tiff", "webp", "hif", "cr3", "mp4"]
         imageFiles = []
         currentIndex = 0
         errorMessage = nil
@@ -846,7 +854,7 @@ struct ContentView: View {
             }
             
             if imageFiles.isEmpty {
-                errorMessage = "在所选文件夹中未找到图片。\n支持的格式: JPG, PNG, GIF, BMP, TIFF, WEBP, HIF, CR3"
+                errorMessage = "在所选文件夹中未找到图片。\n支持的格式: JPG, PNG, GIF, BMP, TIFF, WEBP, HIF, CR3, MP4"
             }
         } catch let error as NSError where error.code == NSFileReadNoPermissionError {
             errorMessage = "权限被拒绝: \(folderURL.path)\n\n解决方法:\n1. 右键点击应用程序并选择\"打开\"\n2. 前往系统偏好设置 > 安全性与隐私 > 隐私\n3. 确保此应用程序有权访问该文件夹\n\n或者, 使用\"选择文件夹\"按钮重新选择文件夹。"
@@ -913,7 +921,7 @@ struct ContentView: View {
                let url = URL(dataRepresentation: urlData, relativeTo: nil) {
                 DispatchQueue.main.async {
                     // 检查是否是图片文件
-                    let supportedExtensions = ["jpg", "jpeg", "png", "gif", "bmp", "tiff", "webp", "hif", "cr3"]
+                    let supportedExtensions = ["jpg", "jpeg", "png", "gif", "bmp", "tiff", "webp", "hif", "cr3", "mp4"]
                     let ext = url.pathExtension.lowercased()
                     
                     if supportedExtensions.contains(ext) {
@@ -1013,6 +1021,18 @@ struct ContentView: View {
         return formatter.string(fromByteCount: Int64(size))
     }
 
+    func isVideoFile(_ url: URL) -> Bool {
+        let videoExtensions = ["mp4", "mov", "avi", "mkv"]
+        let ext = url.pathExtension.lowercased()
+        return videoExtensions.contains(ext)
+    }
+
+    func isImageFile(_ url: URL) -> Bool {
+        let imageExtensions = ["jpg", "jpeg", "png", "gif", "bmp", "tiff", "webp", "hif", "cr3"]
+        let ext = url.pathExtension.lowercased()
+        return imageExtensions.contains(ext)
+    }
+
 }
 
 struct ImageInfo {
@@ -1098,6 +1118,57 @@ struct ImageInfoView: View {
                 return event
             }
         }
+    }
+}
+
+struct VideoPlayerView: NSViewRepresentable {
+    let url: URL
+    
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        
+        // 创建AVPlayer
+        let player = AVPlayer(url: url)
+        
+        // 创建AVPlayerView
+        let playerView = AVPlayerView()
+        playerView.player = player
+        playerView.controlsStyle = .inline
+        playerView.showsFullScreenToggleButton = true
+        playerView.translatesAutoresizingMaskIntoConstraints = false
+        
+        // 将playerView添加到NSView中
+        view.addSubview(playerView)
+        
+        // 设置约束
+        NSLayoutConstraint.activate([
+            playerView.topAnchor.constraint(equalTo: view.topAnchor),
+            playerView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            playerView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            playerView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+        ])
+        
+        // 存储playerView引用到context中以便后续更新
+        context.coordinator.playerView = playerView
+        
+        return view
+    }
+    
+    func updateNSView(_ nsView: NSView, context: Context) {
+        // 当URL发生变化时，更新播放器的URL
+        if let playerView = context.coordinator.playerView {
+            playerView.player = AVPlayer(url: url)
+            // 自动播放新视频
+            playerView.player?.play()
+        }
+    }
+    
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+    
+    class Coordinator {
+        weak var playerView: AVPlayerView?
     }
 }
 
